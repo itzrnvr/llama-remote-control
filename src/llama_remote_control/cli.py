@@ -1285,7 +1285,6 @@ class LlamaCLI:
         if len(args) < 1:
             url = questionary.text(
                 "Model URL:",
-                instruction="HuggingFace or direct download URL",
             ).ask()
             if not url:
                 self.console.print(f"[{Theme.DIM}]Cancelled.[/{Theme.DIM}]")

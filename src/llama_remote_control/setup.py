@@ -60,6 +60,7 @@ def build_llama_cpp(
         True if build succeeds and binary is verified, False otherwise
     """
     from llama_remote_control.theme import Theme
+
     clone_tag = version
     if version == "latest":
         console.print("[bold blue]Fetching latest llama.cpp release tag...[/bold blue]")
@@ -89,11 +90,15 @@ def build_llama_cpp(
     console.print(f"[{Theme.ANNOUNCE}]Cleaning old build...[/{Theme.ANNOUNCE}]")
     result = ssh.exec_interactive("rm -rf /workspace/llama.cpp")
     if result != 0:
-        console.print(f"[{Theme.ERROR}]Failed to clean old build directory[/{Theme.ERROR}]")
+        console.print(
+            f"[{Theme.ERROR}]Failed to clean old build directory[/{Theme.ERROR}]"
+        )
         return False
 
     # Clone repository
-    console.print(f"[{Theme.ANNOUNCE}]Cloning llama.cpp (tag: {clone_tag})...[/{Theme.ANNOUNCE}]")
+    console.print(
+        f"[{Theme.ANNOUNCE}]Cloning llama.cpp (tag: {clone_tag})...[/{Theme.ANNOUNCE}]"
+    )
     clone_cmd = (
         f"cd /workspace && "
         f"git clone --depth 1 --branch {clone_tag} https://github.com/{repo}.git llama.cpp"
@@ -110,7 +115,9 @@ def build_llama_cpp(
     console.print(f"[{Theme.SUCCESS}]✓ Clone complete[/{Theme.SUCCESS}]")
 
     # Configure with CMake
-    console.print(f"[{Theme.ANNOUNCE}]Configuring build with CUDA support...[/{Theme.ANNOUNCE}]")
+    console.print(
+        f"[{Theme.ANNOUNCE}]Configuring build with CUDA support...[/{Theme.ANNOUNCE}]"
+    )
     cmake_cmd = "cd /workspace/llama.cpp && cmake -B build -DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release"
     with alive_bar(
         title="Running CMake configuration...",
@@ -140,7 +147,9 @@ def build_llama_cpp(
         return False
 
     # Verify binary exists
-    console.print(f"[{Theme.ANNOUNCE}]Verifying llama-server binary...[/{Theme.ANNOUNCE}]")
+    console.print(
+        f"[{Theme.ANNOUNCE}]Verifying llama-server binary...[/{Theme.ANNOUNCE}]"
+    )
     with alive_bar(
         title="Checking binary...",
         spinner="dots",
@@ -149,7 +158,9 @@ def build_llama_cpp(
         verify_cmd = "test -f /workspace/llama.cpp/build/bin/llama-server"
         exit_code, _, _ = ssh.exec_command(verify_cmd)
     if exit_code != 0:
-        console.print(f"[{Theme.ERROR}]llama-server binary not found after build[/{Theme.ERROR}]")
+        console.print(
+            f"[{Theme.ERROR}]llama-server binary not found after build[/{Theme.ERROR}]"
+        )
         return False
 
     console.print(f"[{Theme.SUCCESS}]✓ llama.cpp built successfully![/{Theme.SUCCESS}]")
@@ -173,12 +184,16 @@ def setup_llama_path(ssh: "SSHConnection") -> bool:
 
     bin_path = "/workspace/llama.cpp/build/bin"
     console = Console()
-    console.print(f"[{Theme.ANNOUNCE}]Adding llama.cpp binaries to PATH...[/{Theme.ANNOUNCE}]")
+    console.print(
+        f"[{Theme.ANNOUNCE}]Adding llama.cpp binaries to PATH...[/{Theme.ANNOUNCE}]"
+    )
 
     # Verify binary directory exists
     exit_code, _, _ = ssh.exec_command(f"test -d {bin_path}")
     if exit_code != 0:
-        console.print(f"[{Theme.WARNING}]Binary directory not found: {bin_path}[/{Theme.WARNING}]")
+        console.print(
+            f"[{Theme.WARNING}]Binary directory not found: {bin_path}[/{Theme.WARNING}]"
+        )
         return False
 
     success = ssh.ensure_path(bin_path)
@@ -228,11 +243,15 @@ def download_model(
         )
 
     # Remove existing file
-    console.print(f"[{Theme.ANNOUNCE}]Removing existing file if present...[/{Theme.ANNOUNCE}]")
+    console.print(
+        f"[{Theme.ANNOUNCE}]Removing existing file if present...[/{Theme.ANNOUNCE}]"
+    )
     ssh.exec_interactive(f"rm -f /workspace/{filename}")
 
     # Download with aria2c
-    console.print(f"[{Theme.ANNOUNCE}]Downloading model with aria2c...[/{Theme.ANNOUNCE}]")
+    console.print(
+        f"[{Theme.ANNOUNCE}]Downloading model with aria2c...[/{Theme.ANNOUNCE}]"
+    )
     download_cmd = (
         f"cd /workspace && "
         f"aria2c -x 16 -s 16 -d /workspace -o {filename} '{url}' --summary-interval=5"
@@ -241,7 +260,9 @@ def download_model(
 
     # Fallback to wget if aria2c fails
     if result != 0:
-        console.print(f"[{Theme.WARNING}]aria2c failed, trying wget...[/{Theme.WARNING}]")
+        console.print(
+            f"[{Theme.WARNING}]aria2c failed, trying wget...[/{Theme.WARNING}]"
+        )
         with alive_bar(
             title=f"Downloading {filename}...",
             spinner="dots_waves",
@@ -250,7 +271,9 @@ def download_model(
             wget_cmd = f"cd /workspace && wget -O {filename} '{url}'"
             result = ssh.exec_interactive(wget_cmd)
         if result != 0:
-            console.print(f"[{Theme.ERROR}]Download failed with both aria2c and wget[/{Theme.ERROR}]")
+            console.print(
+                f"[{Theme.ERROR}]Download failed with both aria2c and wget[/{Theme.ERROR}]"
+            )
             return False
 
     # Verify file exists and has size > 0
@@ -263,7 +286,9 @@ def download_model(
         verify_cmd = f"test -s /workspace/{filename}"
         exit_code, _, _ = ssh.exec_command(verify_cmd)
     if exit_code != 0:
-        console.print(f"[{Theme.ERROR}]Downloaded file does not exist or is empty[/{Theme.ERROR}]")
+        console.print(
+            f"[{Theme.ERROR}]Downloaded file does not exist or is empty[/{Theme.ERROR}]"
+        )
         return False
 
     # Get file size
@@ -275,7 +300,9 @@ def download_model(
             f"[{Theme.SUCCESS}]✓ Model downloaded successfully ({size_str})![/{Theme.SUCCESS}]"
         )
     else:
-        console.print(f"[{Theme.SUCCESS}]✓ Model downloaded successfully![/{Theme.SUCCESS}]")
+        console.print(
+            f"[{Theme.SUCCESS}]✓ Model downloaded successfully![/{Theme.SUCCESS}]"
+        )
 
     return True
 
@@ -393,21 +420,22 @@ def run_setup_wizard(
         console.print(f"[{Theme.DIM}]Recent: {recent_display}[/{Theme.DIM}]")
 
     # Ask for model URL using questionary with autocomplete
-    url_question = questionary.text(
-        "Model URL:",
-        instruction="(HuggingFace or direct download URL)",
-    )
     if suggestions:
         url_question = questionary.autocomplete(
             "Model URL:",
             choices=suggestions,
-            instruction="Use Tab to autocomplete recent URL",
+        )
+    else:
+        url_question = questionary.text(
+            "Model URL:",
         )
 
     url = url_question.ask()
 
     if not url:
-        console.print(f"[{Theme.ERROR}]No URL provided, canceling setup.[/{Theme.ERROR}]")
+        console.print(
+            f"[{Theme.ERROR}]No URL provided, canceling setup.[/{Theme.ERROR}]"
+        )
         return None
 
     # Auto-detect filename from URL
@@ -437,7 +465,9 @@ def run_setup_wizard(
     console.print()
 
     # Build llama.cpp
-    console.print(f"[{Theme.ANNOUNCE}]Step 1/2: Building llama.cpp...[/{Theme.ANNOUNCE}]")
+    console.print(
+        f"[{Theme.ANNOUNCE}]Step 1/2: Building llama.cpp...[/{Theme.ANNOUNCE}]"
+    )
     build_success = build_llama_cpp(console, ssh, version=version)
     if not build_success:
         console.print(f"[{Theme.ERROR}]Build failed, aborting setup.[/{Theme.ERROR}]")
@@ -458,10 +488,14 @@ def run_setup_wizard(
 
     # Download model
     console.print()
-    console.print(f"[{Theme.ANNOUNCE}]Step 2/2: Downloading model...[/{Theme.ANNOUNCE}]")
+    console.print(
+        f"[{Theme.ANNOUNCE}]Step 2/2: Downloading model...[/{Theme.ANNOUNCE}]"
+    )
     download_success = download_model(console, ssh, url, filename)
     if not download_success:
-        console.print(f"[{Theme.ERROR}]Download failed, setup incomplete.[/{Theme.ERROR}]")
+        console.print(
+            f"[{Theme.ERROR}]Download failed, setup incomplete.[/{Theme.ERROR}]"
+        )
         return None
 
     # Save to recent models
