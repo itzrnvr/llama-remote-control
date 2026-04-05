@@ -216,7 +216,9 @@ class SSHConnection:
         logger.debug(f"Executing command (timeout={timeout}s): {wrapped_cmd}")
 
         try:
-            stdin, stdout, stderr = self.client.exec_command(wrapped_cmd, timeout=timeout)
+            stdin, stdout, stderr = self.client.exec_command(
+                wrapped_cmd, timeout=timeout
+            )
 
             # Wait for command to complete and read output
             exit_code = stdout.channel.recv_exit_status()
@@ -250,7 +252,7 @@ class SSHConnection:
             raise SSHConnectionError("Not connected to SSH server")
 
         # Wrap with PATH if extra paths were added
-        wrapped_cmd = self._wrap_cmd(cmd)
+        wrapped_cmd = self._wrap_cmd(cmd, interactive=True)
 
         logger.debug(f"Executing interactive command: {wrapped_cmd}")
         console.print(f"[dim]$ {cmd}[/dim]")
@@ -315,7 +317,9 @@ class SSHConnection:
         wrapped_cmd = self._wrap_cmd(cmd)
 
         # Construct nohup command that captures PID
-        background_cmd = f"nohup {wrapped_cmd} > /workspace/llama-server.log 2>&1 & echo $!"
+        background_cmd = (
+            f"nohup {wrapped_cmd} > /workspace/llama-server.log 2>&1 & echo $!"
+        )
         logger.debug(f"Executing background command: {background_cmd}")
 
         try:
@@ -417,7 +421,7 @@ class SSHConnection:
         exit_code, stdout, _ = self.exec_command(grep_cmd)
         if "not_found" in stdout:
             # Add to .bashrc
-            append_cmd = f'echo \'export PATH="{path_to_add}:$PATH"\' >> ~/.bashrc'
+            append_cmd = f"echo 'export PATH=\"{path_to_add}:$PATH\"' >> ~/.bashrc"
             exit_code, _, _ = self.exec_command(append_cmd)
             if exit_code != 0:
                 logger.warning(f"Failed to add {path_to_add} to .bashrc")
@@ -430,17 +434,27 @@ class SSHConnection:
 
         return True
 
-    def _wrap_cmd(self, cmd: str) -> str:
+    def _wrap_cmd(self, cmd: str, interactive: bool = False) -> str:
         """
         Prepend extra PATH entries to command if they were added during session.
 
-        Uses `env` to set PATH so it works with nohup/background processes
-        (nohup doesn't understand inline VAR=value shell assignments).
+        For non-interactive commands (exec_command), wraps in bash -c so
+        shell builtins like 'cd' work. For interactive commands (exec_interactive),
+        the PTY already provides a shell, so we use a simple PATH prefix.
+
+        Args:
+            cmd: The command to wrap.
+            interactive: If True, use PATH prefix only (PTY provides shell).
         """
         if not self._extra_paths:
             return cmd
         path_prefix = ":".join(self._extra_paths)
-        return f'env PATH="{path_prefix}:$PATH" {cmd}'
+        if interactive:
+            # PTY sessions already have a shell — just set PATH inline
+            return f'export PATH="{path_prefix}:$PATH"; {cmd}'
+        else:
+            # Non-interactive needs bash -c for shell builtins (cd, etc.)
+            return f"bash -c 'export PATH=\"{path_prefix}:$PATH\"; {cmd}'"
 
     @staticmethod
     def resolve_ssh_target(
