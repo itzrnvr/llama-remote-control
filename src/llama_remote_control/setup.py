@@ -457,11 +457,35 @@ def run_setup_wizard(
     if not filename:
         filename = default_filename
 
-    # Confirm before execution
-    confirm = questionary.confirm(
-        f"Build llama.cpp and download {filename}?",
-        default=True,
+    # Ask about multimodal projector (mmproj) BEFORE downloading
+    mmproj_url = None
+    mmproj_filename = None
+    has_mmproj = questionary.confirm(
+        "Does this model have vision (multimodal)?",
+        default=False,
     ).ask()
+
+    if has_mmproj:
+        mmproj_url = questionary.text(
+            "mmproj download URL:",
+        ).ask()
+        if mmproj_url:
+            mmproj_filename = mmproj_url.split("/")[-1]
+            if not mmproj_filename or ".gguf" not in mmproj_filename:
+                mmproj_filename = "mmproj-model.gguf"
+        else:
+            # User said vision but didn't provide URL
+            console.print(
+                f"[{Theme.DIM}]No mmproj URL provided. You can add --mmproj manually later.[/{Theme.DIM}]"
+            )
+
+    # Build summary and confirm
+    confirm_lines = f"Build llama.cpp and download {filename}"
+    if mmproj_filename:
+        confirm_lines += f" + {mmproj_filename}"
+    confirm_lines += "?"
+
+    confirm = questionary.confirm(confirm_lines, default=True).ask()
 
     if not confirm:
         console.print(f"[{Theme.DIM}]Setup cancelled.[/{Theme.DIM}]")
@@ -471,7 +495,7 @@ def run_setup_wizard(
 
     # Build llama.cpp
     console.print(
-        f"[{Theme.ANNOUNCE}]Step 1/2: Building llama.cpp...[/{Theme.ANNOUNCE}]"
+        f"[{Theme.ANNOUNCE}]Step 1/{'3' if mmproj_url else '2'}: Building llama.cpp...[/{Theme.ANNOUNCE}]"
     )
     build_success = build_llama_cpp(console, ssh, version=version)
     if not build_success:
@@ -492,9 +516,11 @@ def run_setup_wizard(
             llama_version = stdout.strip()
 
     # Download model
+    step_num = 2
+    total_steps = 3 if mmproj_url else 2
     console.print()
     console.print(
-        f"[{Theme.ANNOUNCE}]Step 2/3: Downloading model...[/{Theme.ANNOUNCE}]"
+        f"[{Theme.ANNOUNCE}]Step {step_num}/{total_steps}: Downloading model...[/{Theme.ANNOUNCE}]"
     )
     download_success = download_model(console, ssh, url, filename)
     if not download_success:
@@ -503,39 +529,21 @@ def run_setup_wizard(
         )
         return None
 
-    # Ask about multimodal projector (mmproj)
+    # Download mmproj if URL was provided
     mmproj_path = None
-    has_mmproj = questionary.confirm(
-        "Does this model need a multimodal projector (mmproj)?",
-        default=False,
-    ).ask()
-
-    if has_mmproj:
-        mmproj_url = questionary.text(
-            "mmproj download URL:",
-        ).ask()
-
-        if mmproj_url:
-            mmproj_filename = mmproj_url.split("/")[-1]
-            if not mmproj_filename or ".gguf" not in mmproj_filename:
-                mmproj_filename = "mmproj-model.gguf"
-
-            console.print()
-            console.print(
-                f"[{Theme.ANNOUNCE}]Step 3/3: Downloading mmproj...[/{Theme.ANNOUNCE}]"
-            )
-            mmproj_ok = download_model(console, ssh, mmproj_url, mmproj_filename)
-            if mmproj_ok:
-                mmproj_path = f"/workspace/{mmproj_filename}"
-            else:
-                console.print(
-                    f"[{Theme.WARNING}]mmproj download failed. You can add --mmproj manually later.[/{Theme.WARNING}]"
-                )
-    else:
+    if mmproj_url:
+        step_num = 3
         console.print()
         console.print(
-            f"[{Theme.DIM}]Step 3/3: Skipping mmproj (not needed)[/{Theme.DIM}]"
+            f"[{Theme.ANNOUNCE}]Step {step_num}/{total_steps}: Downloading mmproj...[/{Theme.ANNOUNCE}]"
         )
+        mmproj_ok = download_model(console, ssh, mmproj_url, mmproj_filename)
+        if mmproj_ok:
+            mmproj_path = f"/workspace/{mmproj_filename}"
+        else:
+            console.print(
+                f"[{Theme.WARNING}]mmproj download failed. You can add --mmproj manually later.[/{Theme.WARNING}]"
+            )
 
     # Save to recent models
     model_path = f"/workspace/{filename}"
