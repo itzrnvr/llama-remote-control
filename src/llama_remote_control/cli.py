@@ -1095,7 +1095,9 @@ class LlamaCLI:
 
         # Models (sub-branch of server)
         try:
-            models = setup.list_models(self.ssh)
+            all_models = setup.list_models(self.ssh)
+            models = [m for m in all_models if not m.get("is_mmproj", False)]
+            mmproj_models = [m for m in all_models if m.get("is_mmproj", False)]
             if models:
                 model_branch = server_branch.add(
                     f"{Theme.EMOJI_MODEL} {len(models)} model(s) available"
@@ -1103,6 +1105,10 @@ class LlamaCLI:
                 for m in models:
                     model_branch.add(
                         f"[{Theme.COL_PATH}]{m['filename']} ({m['size_gb']} GB)[/{Theme.COL_PATH}]"
+                    )
+                for m in mmproj_models:
+                    model_branch.add(
+                        f"[{Theme.DIM}]+ mmproj: {m['filename']} ({m['size_gb']} GB)[/{Theme.DIM}]"
                     )
         except Exception:
             pass
@@ -1125,7 +1131,9 @@ class LlamaCLI:
         # Standalone models if not under server
         if not server_branch or not server_branch.children:
             try:
-                models = setup.list_models(self.ssh)
+                all_models = setup.list_models(self.ssh)
+                models = [m for m in all_models if not m.get("is_mmproj", False)]
+                mmproj_models = [m for m in all_models if m.get("is_mmproj", False)]
                 if models:
                     total_gb = sum(m["size_gb"] for m in models)
                     model_branch = tree.add(
@@ -1134,6 +1142,10 @@ class LlamaCLI:
                     for m in models:
                         model_branch.add(
                             f"[{Theme.COL_PATH}]{m['filename']} ({m['size_gb']} GB)[/{Theme.COL_PATH}]"
+                        )
+                    for m in mmproj_models:
+                        model_branch.add(
+                            f"[{Theme.DIM}]+ mmproj: {m['filename']} ({m['size_gb']} GB)[/{Theme.DIM}]"
                         )
             except Exception:
                 pass
@@ -1162,7 +1174,7 @@ class LlamaCLI:
         return True
 
     def _cmd_start(self, args: list[str]) -> bool:
-        """Start llama-server: /start [model.gguf] [--port PORT]"""
+        """Start llama-server: /start [model.gguf] [--port PORT] [--mmproj file.gguf]"""
         if not self.ssh:
             self.console.print(f"[{Theme.ERROR}]Not connected.[/{Theme.ERROR}]")
             return True
@@ -1175,7 +1187,10 @@ class LlamaCLI:
             )
             return True
 
-        models = state["models"]
+        # Filter out mmproj files from model selection
+        models = [m for m in state["models"] if not m.get("is_mmproj", False)]
+        mmproj_models = [m for m in state["models"] if m.get("is_mmproj", False)]
+
         if not models:
             self.console.print(
                 f"[{Theme.ERROR}]No models found. Download one first with /download.[/{Theme.ERROR}]"
@@ -1223,14 +1238,49 @@ class LlamaCLI:
         if port is None:
             port = state["free_port"]
 
+        # Determine mmproj: use user-specified, or auto-detect
+        mmproj_path = None
+        for i, arg in enumerate(args):
+            if arg in ("--mmproj", "--mmproj-path") and i + 1 < len(args):
+                mmproj_path = args[i + 1]
+                break
+
+        if not mmproj_path and mmproj_models:
+            # Auto-detect: if exactly one mmproj file exists, offer to use it
+            if len(mmproj_models) == 1:
+                use_mmproj = questionary.confirm(
+                    f"Found mmproj file: {mmproj_models[0]['filename']}. Use it?",
+                    default=True,
+                ).ask()
+                if use_mmproj:
+                    mmproj_path = mmproj_models[0]["path"]
+            else:
+                # Multiple mmproj files — let user choose
+                mmproj_choices = [
+                    questionary.Choice(title=m["filename"], value=m["path"])
+                    for m in mmproj_models
+                ]
+                mmproj_choices.append(
+                    questionary.Choice(title="None (text-only model)", value=None)
+                )
+                mmproj_path = questionary.select(
+                    "Select mmproj file (or None):",
+                    choices=mmproj_choices,
+                ).ask()
+
         # Use full binary path if available
         server_bin = state.get("llama_server_path") or "llama-server"
 
-        # Start server
-        self.console.print(
-            f"[{Theme.ANNOUNCE}]Starting llama-server with {model_file} on port {port}...[/{Theme.ANNOUNCE}]"
-        )
+        # Build command
         cmd = f"{server_bin} -m {model_path} --host 0.0.0.0 --port {port}"
+        if mmproj_path:
+            cmd += f" --mmproj {mmproj_path}"
+
+        # Start server
+        mmproj_info = f" + mmproj" if mmproj_path else ""
+        self.console.print(
+            f"[{Theme.ANNOUNCE}]Starting llama-server with {model_file}{mmproj_info} on port {port}...[/{Theme.ANNOUNCE}]"
+        )
         self._exec_server(cmd)
         return True
 
@@ -1248,11 +1298,17 @@ class LlamaCLI:
             return True
 
         table = Table(title="Models on /workspace")
+        table.add_column("Type", style=Theme.DIM, no_wrap=True, width=8)
         table.add_column("Filename", style=Theme.COL_ID)
         table.add_column("Size", justify="right", style=Theme.COL_SIZE)
-        table.add_column("Path", style=Theme.COL_PATH)
         for m in models:
-            table.add_row(m["filename"], f"{m['size_gb']} GB", m["path"])
+            file_type = "mmproj" if m.get("is_mmproj") else "model"
+            style = Theme.COL_PATH if not m.get("is_mmproj") else Theme.DIM
+            table.add_row(
+                f"[{Theme.DIM}]{file_type}[/{Theme.DIM}]",
+                f"[{style}]{m['filename']}[/{style}]",
+                f"{m['size_gb']} GB",
+            )
         self.console.print(table)
         return True
 
@@ -1569,7 +1625,9 @@ class LlamaCLI:
         """
         # Detect remote state
         state = self.detect_remote_state()
-        has_models = len(state["models"]) > 0
+        # Filter out mmproj files — they're not standalone models
+        model_files = [m for m in state["models"] if not m.get("is_mmproj", False)]
+        has_models = len(model_files) > 0
         has_llama = state["llama_built"]
         server_running = state["server_running"]
 
@@ -1578,7 +1636,7 @@ class LlamaCLI:
         if has_llama:
             summary_parts.append(f"[green]llama.cpp[/green] {state['llama_version']}")
         if has_models:
-            model_names = ", ".join(m["filename"] for m in state["models"])
+            model_names = ", ".join(m["filename"] for m in model_files)
             summary_parts.append(f"[green]Models:[/green] {model_names}")
         if server_running:
             port_str = f":{state['server_port']}" if state["server_port"] else ""
@@ -1605,7 +1663,7 @@ class LlamaCLI:
         # Option 1: Always offer to start server if not running and we have models
         if not server_running and has_models and has_llama:
             # Auto-pick first model
-            model_file = state["models"][0]["filename"]
+            model_file = model_files[0]["filename"]
             port = state["free_port"]
             port_hint = f" :{port}" if port != 8080 else ""
             choices.append(
@@ -1848,13 +1906,16 @@ class LlamaCLI:
                 self.ssh.kill_server()
                 # Re-detect state after killing server (frees port)
                 state = self.detect_remote_state()
-                if state["models"]:
-                    model_path = state["models"][0]["path"]
+                non_mmproj = [
+                    m for m in state["models"] if not m.get("is_mmproj", False)
+                ]
+                if non_mmproj:
+                    model_path = non_mmproj[0]["path"]
                     port = state["free_port"]
                     server_bin = state.get("llama_server_path") or "llama-server"
                     cmd = f"{server_bin} -m {model_path} --host 0.0.0.0 --port {port}"
                     self.console.print(
-                        f"[{Theme.INFO}]Using model: {state['models'][0]['filename']} on port {port}[/{Theme.INFO}]"
+                        f"[{Theme.INFO}]Using model: {non_mmproj[0]['filename']} on port {port}[/{Theme.INFO}]"
                     )
                     self._exec_server(cmd)
                 else:

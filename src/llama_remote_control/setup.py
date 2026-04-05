@@ -315,7 +315,8 @@ def list_models(ssh: "SSHConnection") -> list[dict]:
         ssh: SSH connection to the remote instance
 
     Returns:
-        List of model dictionaries with keys: filename, size_gb, path.
+        List of model dictionaries with keys: filename, size_gb, path, is_mmproj.
+        is_mmproj is True if the filename contains 'mmproj' (multimodal projector).
         Returns empty list if no models found or command fails.
     """
     cmd = "ls -lh /workspace/*.gguf 2>/dev/null"
@@ -352,11 +353,15 @@ def list_models(ssh: "SSHConnection") -> list[dict]:
         except (ValueError, IndexError):
             pass
 
+        basename = filename.split("/")[-1]
+        is_mmproj = "mmproj" in basename.lower()
+
         models.append(
             {
-                "filename": filename.split("/")[-1],  # Just the basename
+                "filename": basename,
                 "size_gb": round(size_gb, 2),
                 "path": filename,
+                "is_mmproj": is_mmproj,
             }
         )
 
@@ -489,7 +494,7 @@ def run_setup_wizard(
     # Download model
     console.print()
     console.print(
-        f"[{Theme.ANNOUNCE}]Step 2/2: Downloading model...[/{Theme.ANNOUNCE}]"
+        f"[{Theme.ANNOUNCE}]Step 2/3: Downloading model...[/{Theme.ANNOUNCE}]"
     )
     download_success = download_model(console, ssh, url, filename)
     if not download_success:
@@ -497,6 +502,40 @@ def run_setup_wizard(
             f"[{Theme.ERROR}]Download failed, setup incomplete.[/{Theme.ERROR}]"
         )
         return None
+
+    # Ask about multimodal projector (mmproj)
+    mmproj_path = None
+    has_mmproj = questionary.confirm(
+        "Does this model need a multimodal projector (mmproj)?",
+        default=False,
+    ).ask()
+
+    if has_mmproj:
+        mmproj_url = questionary.text(
+            "mmproj download URL:",
+        ).ask()
+
+        if mmproj_url:
+            mmproj_filename = mmproj_url.split("/")[-1]
+            if not mmproj_filename or ".gguf" not in mmproj_filename:
+                mmproj_filename = "mmproj-model.gguf"
+
+            console.print()
+            console.print(
+                f"[{Theme.ANNOUNCE}]Step 3/3: Downloading mmproj...[/{Theme.ANNOUNCE}]"
+            )
+            mmproj_ok = download_model(console, ssh, mmproj_url, mmproj_filename)
+            if mmproj_ok:
+                mmproj_path = f"/workspace/{mmproj_filename}"
+            else:
+                console.print(
+                    f"[{Theme.WARNING}]mmproj download failed. You can add --mmproj manually later.[/{Theme.WARNING}]"
+                )
+    else:
+        console.print()
+        console.print(
+            f"[{Theme.DIM}]Step 3/3: Skipping mmproj (not needed)[/{Theme.DIM}]"
+        )
 
     # Save to recent models
     model_path = f"/workspace/{filename}"
@@ -506,10 +545,15 @@ def run_setup_wizard(
     console.print()
     console.print(
         Panel.fit(
-            f"[{Theme.SUCCESS}]✓ Setup complete![/{Theme.SUCCESS}]\n"
+            f"[{Theme.SUCCESS}]Setup complete![/{Theme.SUCCESS}]\n"
             f"[{Theme.DIM}]Model:[/{Theme.DIM}] {filename}\n"
             f"[{Theme.DIM}]Path:[/{Theme.DIM}] {model_path}\n"
-            f"[{Theme.DIM}]llama.cpp:[/{Theme.DIM}] {llama_version}",
+            + (
+                f"[{Theme.DIM}]mmproj:[/{Theme.DIM}] {mmproj_path}\n"
+                if mmproj_path
+                else ""
+            )
+            + f"[{Theme.DIM}]llama.cpp:[/{Theme.DIM}] {llama_version}",
             border_style=Theme.BORDER_SUCCESS,
         )
     )
